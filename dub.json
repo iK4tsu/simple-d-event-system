@@ -1,0 +1,10 @@
+{
+	"name": "d-simple-event-system",
+
+	"authors": ["João Lourenço"],
+	"sourcePaths": ["source"],
+	"importPaths": ["source"],
+
+	"targetPath": "bin",
+	"targetName": "eventsystem"
+}
