@@ -5,6 +5,12 @@
 	"sourcePaths": ["source"],
 	"importPaths": ["source"],
 
+	"license": "GPL-3.0",
+
 	"targetPath": "bin",
-	"targetName": "eventsystem"
+	"targetName": "eventsystem",
+
+	"dependencies": {
+		"aurorafw:unit": "~>0.0.1-alpha.4"
+	}
 }
