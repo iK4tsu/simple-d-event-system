@@ -1,4 +1,4 @@
-module event;
+module deventsystem.event;
 
 
 /** Main event class
@@ -328,7 +328,7 @@ version(unittest)
 	private:
 		void onEvent(Event e)
 		{
-			import eventdispacher : EventDispacher;
+			import deventsystem.eventdispacher : EventDispacher;
 			auto ed = scoped!EventDispacher(e);
 			ed.dispach!FooEvent(&onFoo.dispach);
 			ed.dispach!BarEvent(&onBar.dispach);

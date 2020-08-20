@@ -1,5 +1,5 @@
 {
-	"name": "d-simple-event-system",
+	"name": "deventsystem",
 
 	"authors": ["João Lourenço"],
 	"sourcePaths": ["source"],
@@ -8,7 +8,8 @@
 	"license": "GPL-3.0",
 
 	"targetPath": "bin",
-	"targetName": "eventsystem",
+	"targetName": "deventsystem",
+	"targetType": "library",
 
 	"dependencies": {
 		"aurorafw:unit": "~>0.0.1-alpha.4"

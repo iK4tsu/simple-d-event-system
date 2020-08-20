@@ -1,6 +1,6 @@
-module eventdispacher;
+module deventsystem.eventdispacher;
 
-import event : Event;
+import deventsystem.event : Event;
 
 
 /** Dispach an Event to a function
@@ -73,7 +73,7 @@ private:
 version(unittest)
 {
 	import aurorafw.unit;
-	import event : EventType, basicEventType;
+	import deventsystem.event : EventType, basicEventType;
 
 	@EventType("FooEvent")
 	class FooEvent : Event
