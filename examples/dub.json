@@ -1,0 +1,12 @@
+{
+	"name": "dsimpleeventsystem-examples",
+	"license": "GPL-3.0",
+	"authors": ["João Lourenço"],
+	"targetType": "none",
+	"dependencies": {
+		":simplesystem": "*"
+	},
+	"subPackages": [
+		"simplesystem"
+	]
+}

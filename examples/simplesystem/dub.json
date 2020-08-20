@@ -1,0 +1,11 @@
+{
+	"name": "simplesystem",
+	"authors": ["João Lourenço"],
+	"targetType": "executable",
+	"targetPath": "../../bin",
+	"sourcePaths": ["source"],
+	"importPaths": ["source"],
+	"dependencies": {
+		"deventsystem": {"path": "../../"}
+	}
+}
