@@ -1,5 +1,7 @@
 module deventsystem.event;
 
+version(unittest) import aurorafw.unit;
+
 
 /** Main event class
  *
@@ -13,7 +15,7 @@ public:
 	abstract @property string eventType() const;
 
 
-	pragma(inline, true) @safe pure
+	@safe
 	override string toString() const
 	{
 		return eventType;
@@ -34,6 +36,10 @@ public:
 	{
 		return eventType == otherType;
 	}
+
+
+	// defaults to false
+	bool handled;
 }
 
 
@@ -81,14 +87,14 @@ public:
 mixin template basicEventType(T : Event)
 {
 public:
-	pragma(inline, true) @safe pure
+	@safe pure
 	static @property string staticEventType()
 	{
 		import std.traits : getUDAs;
 		return getUDAs!(T, EventType)[0].name;
 	}
 
-	pragma(inline, true) @safe pure
+	@safe pure
 	override @property string eventType() const
 	{
 		return staticEventType;
@@ -132,21 +138,32 @@ unittest
  *
  * class Foo
  * {
- *     mixin genCallback!(const Foo, EventType, const x, const y) onClicked;
+ *     mixin genCallback!(const Foo, ClickEvent, const size_t, "x", const size_t, "y") onClicked;
  *     // Note: you can leave the parameters blank, if you do, then the event
  *     //     itself will be passed as the second parameter as const
  * public :
  *     void click(in size_t x, in size_t y)
  *     {
  *         // click stuff here
- *         onClicked.dispach(new EventType(x, y));
+ *         onClicked.emit(x, y);
+ *     }
+ *
+ *     void onEvent(Event event)
+ *     {
+ *         // handle your events here
+ *         auto dispacher = scoped!EventDispacher(event);
+ *         dispacher.dispach!ClickEvent(&onClicked.dispach);
  *     }
  * }
  *
- * void onFooClicked(in Foo sender, in size_t x, in size_t y)
+ * bool onFooClicked(in Foo sender, in size_t x, in size_t y)
  * {
  *     // do stuff here
  *     assert([x, y] == [4, 5]);
+ *
+ *     // true to handle the event
+ *     // false to propagate
+ *     return true;
  * }
  *
  * void main()
@@ -161,44 +178,114 @@ mixin template genCallback(T, E : Event, args ...)
 {
 	static assert(is(T == class));
 
+	import std.typecons : scoped;
+	import std.string : format;
+
 	/**
 	 * if parameters as passed then use them as the callback delegate parameters,
 	 * otherwise just pass the event itself
 	 */
 	static if (args.length)
 	{
-		import std.meta : AliasSeq, Filter, templateNot;
+		import std.meta : AliasSeq, Filter, templateNot, Stride;
 		import std.traits : isType;
+		import deventsystem.event : toEventFormat, joinTypeName, stringTuple;
 
 		private alias _as = AliasSeq!args;
 		private alias _types = Filter!(isType, _as);
-		private enum _names = toEventFormat!(Filter!(templateNot!isType, _as));
+		private enum _eventnames = toEventFormat!(Filter!(templateNot!isType, _as));
+		private enum _names = Filter!(templateNot!isType, _as);
 
-		static assert(Filter!(templateNot!isType, _as).length == _types.length);
+		/**
+		 * just check if types aren't followed by another type
+		 * do not let the user insert args like (int, int, "foo", "bar")
+		 */
+		import std.typecons : Tuple;
+		static assert(is(Tuple!_types == Tuple!(Stride!(2, _as))),
+			"Cannot have sequential types!");
 	}
 	else
 	{
 		private alias _types = const E;
-		private enum _names = ",event";
+		private enum _eventnames = ",event";
 	}
 
 public:
-	pure
-	void connect(void delegate (T, _types) dg)
-		in (dg.ptr !is null)
+	@system pure
+	void connect(bool delegate (T, _types) dg)
+		in(dg.funcptr !is null || dg.ptr !is null)
 	{
 		callback = dg;
+	}
+
+	static if (args.length)
+	{
+		private alias ctorOverloads = __traits(getOverloads, E, "__ctor");
+		private enum len = ctorOverloads.length;
+		static foreach (j, t; ctorOverloads)
+		{
+			import std.traits : Parameters, isImplicitlyConvertible;
+			alias par = Parameters!t;
+			static foreach (i, type; _types)
+			{
+				static if (j == len - 1)
+				{
+					static if (_types.length != par.length)
+					{
+						static assert (_types.length == par.length,
+							"Type(s) in %s are not valid in any of the %s ctor overloads!"
+							.format(_types.stringof, E.stringof)
+							~" Failed on: types.length <> ctor_parameters.length (%s <> %s) at %s"
+							.format(_types.length, par.length, typeof(t).stringof));
+					}
+					else static if ((!isImplicitlyConvertible!(type, par[i])))
+					{
+						static assert (isImplicitlyConvertible!(type, par[i]),
+							"Type(s) in %s are not valid in any of the %s ctor overloads!"
+							.format(_types.stringof, E.stringof)
+							~" Failed on: <%s> cannot convert to <%s> at %s"
+							.format(type.stringof, par[i].stringof, typeof(t).stringof));
+					}
+				}
+			}
+		}
+		mixin("void emit(",joinTypeName!(args),")
+		{
+			import std.string : format;
+			mixin(\"auto event = scoped!E(%s);\".format(stringTuple!_names));
+			emit(event);
+		}");
+	}
+	else static if (__traits(compiles, scoped!E()))
+	{
+		void emit()
+		{
+			auto event = scoped!E;
+			onEvent(event);
+		}
+	}
+
+	/**
+	 * in case the user wants to declare the event beforehand or if the user
+	 *   wants a callback only with sender and the event but the event doesn't
+	 *   have an empty ctor
+	 */
+	void emit(E event)
+		in(event !is null, "%s cannot be null".format(E.stringof))
+	{
+		if (callback.funcptr !is null || callback.ptr !is null)
+			onEvent(event);
 	}
 
 protected:
 	void dispach(E event)
 	{
 		import std.string : format;
-		if (callback.ptr !is null)
-			mixin("callback(this%s);".format(_names));
+		if (callback.funcptr !is null || callback.ptr !is null)
+			mixin("event.handled = callback(this%s);".format(_eventnames));
 	}
 
-	void delegate(T, _types) callback;
+	bool delegate(T, _types) callback;
 }
 
 
@@ -220,7 +307,7 @@ protected:
  * Returns:
  *     string `enum`
  */
-private template toEventFormat(args ...)
+template toEventFormat(args ...)
 {
 	@safe pure
 	auto toEventFormat()
@@ -238,6 +325,7 @@ private template toEventFormat(args ...)
 	}
 }
 
+
 @("Event: toEventFormat") @safe
 unittest
 {
@@ -245,19 +333,63 @@ unittest
 }
 
 
-version(unittest) import aurorafw.unit;
+template joinTypeName(args ...)
+{
+	string joinTypeName()
+	{
+		import std.meta : AliasSeq, Filter, templateNot;
+		import std.traits : isType;
+		import std.string : format;
+
+		alias _as = AliasSeq!args;
+		alias types = Filter!(isType, _as);
+		enum names = Filter!(templateNot!isType, _as);
+
+		static assert(names.length == types.length,
+				"Types length and Names length do not match! (%s types and %s names)"
+				.format(types.length, names.length));
+
+		string ret;
+		foreach (i, type; types)
+		{
+			ret ~= type.stringof ~ " " ~ names[i] ~ ",";
+		}
+		return ret[0 .. $ - 1];
+	}
+}
+
+
+template stringTuple(args ...)
+{
+	auto stringTuple()
+	{
+		import std.array : appender;
+		auto ret = appender!string;
+		foreach (str; args)
+			ret ~= str ~ ",";
+		return ret.data[0 .. $ - 1];
+	}
+}
+
+
 version(unittest)
 {
-	@safe pure
-	void onFooEvent(in Foo sender, in int a, in int b, in int c)
+	@safe
+	bool onFooEvent(in Foo sender, in int a, int b, int c)
 	{
 		assertEquals([a,b,c], [2,4,5]);
+
+		return true;
 	}
 
-	@safe pure
-	void onBarEvent(in Foo sender, in BarEvent event)
+	@safe
+	bool onBarEvent(in Foo sender, in BarEvent event)
 	{
 		assertEquals(event.toString, "BarEvent");
+		assertEquals([event.x, event.y], [2, 4]);
+
+		// handle
+		return true;
 	}
 
 
@@ -289,13 +421,17 @@ version(unittest)
 			this.y = y;
 		}
 
+		this()
+		{
+			this(3, 7);
+		}
+
 		const size_t x, y;
 	}
 
-	import std.typecons : scoped;
 	class Foo
 	{
-		mixin genCallback!(const Foo, FooEvent, const int, "a", const int, "b", const int, "c") onFoo;
+		mixin genCallback!(const Foo, FooEvent, const int, "a", int, "b", int, "c") onFoo;
 		mixin genCallback!(const Foo, BarEvent) onBar;
 
 	public:
@@ -306,30 +442,26 @@ version(unittest)
 			this.c = c;
 		}
 
-		@trusted
-		void fireFoo()
-		{
-			/* some foo logic */
-
-			/* fire the event */
-			auto event = scoped!FooEvent(a,b,c);
-			onEvent(event);
-		}
-
-		@trusted
 		void bar()
 		{
-			/* bar logic */
-
-			/* fire the event */
-			auto event = scoped!BarEvent(4,5);
-			onEvent(event);
+			import std.typecons : scoped;
+			auto event = scoped!BarEvent(a, b);
+			onBar.emit(event);
+			assert(event.handled);
 		}
-	private:
-		void onEvent(Event e)
+
+		void foo()
 		{
+			onFoo.emit(a, b, c);
+		}
+
+	private:
+		@system
+		void onEvent(Event event)
+		{
+			import std.typecons : scoped;
 			import deventsystem.eventdispacher : EventDispacher;
-			auto ed = scoped!EventDispacher(e);
+			auto ed = scoped!EventDispacher(event);
 			ed.dispach!FooEvent(&onFoo.dispach);
 			ed.dispach!BarEvent(&onBar.dispach);
 		}
@@ -349,12 +481,12 @@ unittest
 unittest
 {
 	Foo foo = new Foo(2,4,5);
-	foo.fireFoo(); // nothing fires
-	foo.bar();
+	foo.foo(); // nothing fires
 
 	import std.functional : toDelegate;
 	foo.onFoo.connect(toDelegate(&onFooEvent));
 	foo.onBar.connect(toDelegate(&onBarEvent));
-	foo.fireFoo(); // fires onFooEvent
+
+	foo.foo(); // fires onFooEvent
 	foo.bar(); // fires onBarEvent
 }

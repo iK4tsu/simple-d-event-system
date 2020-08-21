@@ -59,7 +59,7 @@ public:
 	 */
 	@system
 	void dispach(T : Event)(in void delegate(T) func)
-		in(func.ptr !is null)
+		in(func.ptr !is null || func.funcptr !is null)
 	{
 		if (event.isEventTypeOf(T.staticEventType))
 			func(cast(T) event);
