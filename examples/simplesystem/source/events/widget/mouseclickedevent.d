@@ -1,4 +1,4 @@
-module events.mouseclickedevent;
+module events.widget.mouseclickedevent;
 
 import deventsystem.event;
 
