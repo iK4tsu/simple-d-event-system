@@ -70,7 +70,7 @@ private:
 }
 
 
-version(unittest)
+private version(unittest)
 {
 	import aurorafw.unit;
 	import deventsystem.event : EventType, basicEventType;
@@ -102,7 +102,6 @@ unittest
 		assertSame(_event, event);
 		assertNotSame(_event, event2);
 	});
-
 
 	ed.dispach!FooEvent((in FooEvent _event) {
 		assertSame(_event, event);

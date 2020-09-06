@@ -206,7 +206,7 @@ mixin template genCallback(T, E : Event, args ...)
 	}
 	else
 	{
-		private alias _types = const E;
+		private alias _types = E;
 		private enum _eventnames = ",event";
 	}
 
@@ -249,12 +249,13 @@ public:
 				}
 			}
 		}
-		mixin("void emit(",joinTypeName!(args),")
-		{
-			import std.string : format;
-			mixin(\"auto event = scoped!E(%s);\".format(stringTuple!_names));
-			emit(event);
-		}");
+		mixin(q{
+			void emit(},joinTypeName!args,q{)
+			{
+				import std.string : format;
+				mixin(q{ auto event = scoped!E(%s); }.format(stringTuple!_names));
+				emit(event);
+			}});
 	}
 	else static if (__traits(compiles, scoped!E()))
 	{
@@ -282,7 +283,9 @@ protected:
 	{
 		import std.string : format;
 		if (callback.funcptr !is null || callback.ptr !is null)
-			mixin("event.handled = callback(this%s);".format(_eventnames));
+			mixin(q{
+				event.handled = callback(this%s);}
+				.format(_eventnames));
 	}
 
 	bool delegate(T, _types) callback;
@@ -312,7 +315,8 @@ template toEventFormat(args ...)
 	@safe pure
 	auto toEventFormat()
 	{
-		string ret;
+		import std.array : appender;
+		auto ret = appender!string;
 		foreach (var; args)
 		{
 			import std.string : format;
@@ -321,22 +325,41 @@ template toEventFormat(args ...)
 			static assert(is(typeof(var) == string));
 			ret ~= ",event." ~ var;
 		}
-		return ret;
+		return ret.data;
 	}
 }
 
 
-@("Event: toEventFormat") @safe
+@safe
+@("Event: toEventFormat")
 unittest
 {
 	assertEquals(toEventFormat!("a", "b"), (",event.a,event.b"));
 }
 
 
+/** Generate function parameters with named types
+ *
+ * Takes in var types and literal strings alternatively and joins them in a
+ *     string. \
+ * \
+ * This is used internaly only!
+ *
+ * Examples:
+ * --------------------
+ * enum params = joinTypeName!(int,"var1",const char,"var2",string,"var3");
+ * assert(params == "int var1,const(char) var2,string var3");
+ * --------------------
+ *
+ * Returns:
+ *     `string` of named parameters
+ */
 template joinTypeName(args ...)
 {
-	string joinTypeName()
+	@safe pure
+	auto joinTypeName()
 	{
+		import std.array : appender;
 		import std.meta : AliasSeq, Filter, templateNot;
 		import std.traits : isType;
 		import std.string : format;
@@ -349,21 +372,54 @@ template joinTypeName(args ...)
 				"Types length and Names length do not match! (%s types and %s names)"
 				.format(types.length, names.length));
 
-		string ret;
+		auto ret = appender!string;
 		foreach (i, type; types)
 		{
 			ret ~= type.stringof ~ " " ~ names[i] ~ ",";
 		}
-		return ret[0 .. $ - 1];
+		return ret.data[0 .. $ - 1];
 	}
 }
 
 
+@safe
+@("Event: joinTypeName")
+unittest
+{
+	assertEquals(joinTypeName!(int,"foo",string,"bar"), "int foo,string bar");
+	assertEquals(joinTypeName!(const int,"i",immutable char,"c"), "const(int) i,immutable(char) c");
+}
+
+
+/** Joins strings with a coma
+ *
+ * Takes in multiple strings and joins them into one string
+ *     separated by comas;
+ *
+ * Examples:
+ * --------------------
+ * assertEquals(stringTuple!("hi", "there"), "hi,there");
+ * --------------------
+ *
+ * Returns:
+ *     `string` of joined string separated by comas
+ */
 template stringTuple(args ...)
 {
+	@safe pure
 	auto stringTuple()
 	{
 		import std.array : appender;
+		import std.string : format;
+		import std.traits : isSomeString, isTypeTuple;
+
+		foreach (v; args)
+		{
+			static assert(isSomeString!(typeof(v)),
+				"Args must be a string! (%s of type \'%s\' is not a string)"
+				.format(v, typeof(v).stringof));
+		}
+
 		auto ret = appender!string;
 		foreach (str; args)
 			ret ~= str ~ ",";
@@ -372,7 +428,15 @@ template stringTuple(args ...)
 }
 
 
-version(unittest)
+@safe
+@("Event: stringTuple")
+unittest
+{
+	assertEquals(stringTuple!("hi", "there"), "hi,there");
+}
+
+
+private version(unittest)
 {
 	@safe
 	bool onFooEvent(in Foo sender, in int a, int b, int c)
@@ -421,18 +485,26 @@ version(unittest)
 			this.y = y;
 		}
 
+		const size_t x, y;
+	}
+
+	@EventType("BazEvent")
+	@safe class BazEvent : BarEvent
+	{
+		mixin basicEventType!BazEvent;
+
+	public:
 		this()
 		{
-			this(3, 7);
+			super(3, 7);
 		}
-
-		const size_t x, y;
 	}
 
 	class Foo
 	{
 		mixin genCallback!(const Foo, FooEvent, const int, "a", int, "b", int, "c") onFoo;
 		mixin genCallback!(const Foo, BarEvent) onBar;
+		mixin genCallback!(Foo, BazEvent) onBaz;
 
 	public:
 		this(in int a, in int b, in int c)
@@ -440,6 +512,12 @@ version(unittest)
 			this.a = a;
 			this.b = b;
 			this.c = c;
+
+			onBaz.connect(delegate bool(Foo, BazEvent event) {
+				assertEquals([event.x, event.y], [3, 7]);
+
+				return true;
+			});
 		}
 
 		void bar()
@@ -447,12 +525,18 @@ version(unittest)
 			import std.typecons : scoped;
 			auto event = scoped!BarEvent(a, b);
 			onBar.emit(event);
-			assert(event.handled);
+
+			assertTrue(event.handled);
 		}
 
 		void foo()
 		{
 			onFoo.emit(a, b, c);
+		}
+
+		void baz()
+		{
+			onBaz.emit();
 		}
 
 	private:
@@ -464,6 +548,7 @@ version(unittest)
 			auto ed = scoped!EventDispacher(event);
 			ed.dispach!FooEvent(&onFoo.dispach);
 			ed.dispach!BarEvent(&onBar.dispach);
+			ed.dispach!BazEvent(&onBaz.dispach);
 		}
 
 		const int a, b, c;
@@ -482,6 +567,7 @@ unittest
 {
 	Foo foo = new Foo(2,4,5);
 	foo.foo(); // nothing fires
+	foo.baz(); // fires the default onBaz event
 
 	import std.functional : toDelegate;
 	foo.onFoo.connect(toDelegate(&onFooEvent));
